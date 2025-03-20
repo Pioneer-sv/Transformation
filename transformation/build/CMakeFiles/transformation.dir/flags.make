@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/robot/MainFolder/Public/Robot/Basic/github/Transformation/transformation/include
+CXX_INCLUDES = -I/home/robot/MainFolder/Public/Robot/Code/Transformation/transformation/include
 
 CXX_FLAGS = 
 

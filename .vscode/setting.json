@@ -1,0 +1,6 @@
+{
+    "C_Cpp.default.compilerPath": "/usr/bin/g++", 
+    "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+    "editor.formatOnSave": true, 
+    "editor.tabSize": 4 
+}
