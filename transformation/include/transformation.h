@@ -2,7 +2,7 @@
 #define __TRANSFORMATION_H__
 
 /*
- * 待实现功能：旋转序列支持大小写、轴角置零化、注释规范化、置零处理算法时间复杂度优化
+ * 待实现功能：轴角置零化、注释规范化、置零处理算法时间复杂度优化
  */
 
 #include <cmath>
@@ -20,28 +20,51 @@ static const std::unordered_map<std::string, std::array<int, 3>> orderMap =
 {
     {"zxy", {2, 0, 1}}, {"zyx", {2, 1, 0}}, 
     {"yxz", {1, 0, 2}}, {"yzx", {1, 2, 0}},
-    {"xyz", {0, 1, 2}}, {"xzy", {0, 2, 1}}
+    {"xyz", {0, 1, 2}}, {"xzy", {0, 2, 1}},
+    {"ZXY", {2, 0, 1}}, {"ZYX", {2, 1, 0}}, 
+    {"YXZ", {1, 0, 2}}, {"YZX", {1, 2, 0}}, 
+    {"XYZ", {0, 1, 2}}, {"XZY", {0, 2, 1}}
 };
 
-/**
- * @brief 处理异常并返回默认值
- * @param e 异常对象
- * @return 默认返回值（如零向量）
+/** 
+ * @brief 将欧拉角旋转序列转化为索引顺序
+ * @param order 欧拉角旋转序列
+ * @return 三元整型数组
  */
-inline Eigen::Vector3d handleException(const std::exception& e) 
+inline std::array<int, 3> parseOrder(const std::string& order)
 {
-    std::cerr << "异常信息：" << e.what() << std::endl;
-    return Eigen::Vector3d::Zero();  // 返回默认值
+    auto it = orderMap.find(order);
+
+    // 查找映射表中是否有对应元素
+    if (it != orderMap.end())
+    {
+        return it->second;
+    }
+
+    // 抛出异常以处理无效输入
+    throw std::invalid_argument("输入的旋转序列带有重复轴或输入错误，无法转换为索引顺序！");
+}
+
+/** 
+ * @brief 判断旋转矩阵是否正交
+ * @param order 要判断的旋转矩阵
+ */
+void rotationMatrixIsUnitary(const Eigen::Matrix3d& R)
+{
+    if (!R.isUnitary())
+    {
+        throw std::invalid_argument("输入的旋转矩阵不是正交阵，无法转换为轴角！");
+    }
 }
 
 /** 
  * @brief 将接近零的数置零
- * @param 要处理的矩阵或向量
- * @param 临界点 1e-10
+ * @param mat 要处理的矩阵或向量
+ * @param threshold 临界点 1e-10
  * Eigen::MatrixBase<Derived>表示Eigen任意矩阵类型，Eigen::MatrixBase是Eigen库中的基类模板，
  * 所有矩阵和向量都继承自它，Derived是模板参数，当传入参数时，处理的对象类型自然确定下来
  */
-template <typename Derived>
+template <class Derived>
 auto roundNearZero(const Eigen::MatrixBase<Derived>& mat, double threshold = 1e-10) 
 {
     using PlainMatrix = typename Derived::PlainObject;
@@ -60,10 +83,19 @@ auto roundNearZero(const Eigen::MatrixBase<Derived>& mat, double threshold = 1e-
     return result;
 }
 
+/**
+ * @brief 处理异常并返回默认值
+ * @param e 异常对象，捕获到的标准异常
+ */
+inline void handleException(const std::exception& e) 
+{
+    std::cerr << "异常信息：" << e.what() << std::endl; // 输出异常信息
+}
+
 /** 
  * @brief 欧拉角转绕X轴的旋转矩阵
- * @param 欧拉角
- * @param 角度在旋转序列中的位置
+ * @param eulerAngle 欧拉角
+ * @param n 角度在旋转序列中的位置
  * @return 旋转矩阵
  */
 inline Eigen::Matrix3d XR(const Eigen::Vector3d& eulerAngle, int n) 
@@ -73,8 +105,8 @@ inline Eigen::Matrix3d XR(const Eigen::Vector3d& eulerAngle, int n)
 
 /** 
  * @brief 欧拉角转绕Y轴的旋转矩阵
- * @param 欧拉角
- * @param 角度在旋转序列中的位置
+ * @param eulerAngle 欧拉角
+ * @param n 角度在旋转序列中的位置
  * @return 旋转矩阵
  */
 inline Eigen::Matrix3d YR(const Eigen::Vector3d& eulerAngle, int n) 
@@ -84,8 +116,8 @@ inline Eigen::Matrix3d YR(const Eigen::Vector3d& eulerAngle, int n)
 
 /** 
  * @brief 欧拉角转绕Z轴的旋转矩阵
- * @param 欧拉角
- * @param 角度在旋转序列中的位置
+ * @param eulerAngle 欧拉角
+ * @param n 角度在旋转序列中的位置
  * @return 旋转矩阵
  */
 inline Eigen::Matrix3d ZR(const Eigen::Vector3d& eulerAngle, int n) 
@@ -95,8 +127,8 @@ inline Eigen::Matrix3d ZR(const Eigen::Vector3d& eulerAngle, int n)
 
 /** 
  * @brief 欧拉角转轴角
- * @param 欧拉角
- * @param 角度在旋转序列中的位置
+ * @param eulerAngle 欧拉角
+ * @param n 角度在旋转序列中的位置
  * @return 轴角
  */
 inline Eigen::AngleAxisd X(const Eigen::Vector3d& eulerAngle, int n) 
@@ -106,8 +138,8 @@ inline Eigen::AngleAxisd X(const Eigen::Vector3d& eulerAngle, int n)
 
 /** 
  * @brief 欧拉角转轴角
- * @param 欧拉角
- * @param 角度在旋转序列中的位置
+ * @param eulerAngle 欧拉角
+ * @param n 角度在旋转序列中的位置
  * @return 轴角
  */
 inline Eigen::AngleAxisd Y(const Eigen::Vector3d& eulerAngle, int n) 
@@ -117,8 +149,8 @@ inline Eigen::AngleAxisd Y(const Eigen::Vector3d& eulerAngle, int n)
 
 /** 
  * @brief 欧拉角转轴角
- * @param 欧拉角
- * @param 角度在旋转序列中的位置
+ * @param eulerAngle 欧拉角
+ * @param n 角度在旋转序列中的位置
  * @return 轴角
  */
 inline Eigen::AngleAxisd Z(const Eigen::Vector3d& eulerAngle, int n) 
@@ -127,28 +159,9 @@ inline Eigen::AngleAxisd Z(const Eigen::Vector3d& eulerAngle, int n)
 }
 
 /** 
- * @brief 将卡丹角旋转序列转化为索引顺序
- * @param 旋转矩阵
- * @return 三元整型数组
- */
-inline std::array<int, 3> parseOrder(const std::string& order)
-{
-    auto it = orderMap.find(order);
-
-    // 查找映射表中是否有对应元素
-    if (it != orderMap.end())
-    {
-        return it->second;
-    }
-
-    // 抛出异常以处理无效输入
-    throw std::invalid_argument("输入的旋转序列带有重复轴或输入错误，无法转换为索引顺序！");
-}
-
-/** 
  * @brief 旋转矩阵转欧拉角
- * @param 旋转矩阵
- * @param 欧拉角变换顺序
+ * @param R 旋转矩阵
+ * @param order 欧拉角变换顺序
  * @return 欧拉角
  */
 Eigen::Vector3d rotationMatrixToEulerAngle(const Eigen::Matrix3d& R, const std::string& order)
@@ -165,44 +178,48 @@ Eigen::Vector3d rotationMatrixToEulerAngle(const Eigen::Matrix3d& R, const std::
     }
     catch (const std::exception& e)
     {
-        return handleException(e); // 调用异常处理函数
+        handleException(e); // 调用异常处理函数
+        return Eigen::Vector3d::Zero();
     }
 }
 
 /** 
  * @brief 旋转矩阵转轴角
- * @param 旋转矩阵
+ * @param R 旋转矩阵
  * @return 轴角
  */
 Eigen::AngleAxisd rotationMatrixToAxisAngle(const Eigen::Matrix3d& R)
 {
-    if (!R.isUnitary())
+    try 
     {
-        throw std::invalid_argument("输入的旋转矩阵不是正交阵，无法转换为轴角！");
-    }
-
-    double numerator = sqrt(pow(R(2, 1) - R(1, 2), 2) + 
+       double numerator = sqrt(pow(R(2, 1) - R(1, 2), 2) + 
                             pow(R(0, 2) - R(2, 0), 2) + 
                             pow(R(1, 0) - R(0, 1), 2));
 
-    double angle = atan2(numerator, R.trace() - 1);
+        double angle = atan2(numerator, R.trace() - 1); // 角
 
-    // 处理角度接近零的情况
-    if (std::abs(angle) < 1e-6) 
-    {
-        return Eigen::AngleAxisd(angle, Eigen::Vector3d::Zero());  // 返回零向量表示无显著旋转
+        // 处理角度接近零的情况
+        if (std::abs(angle) < 1e-6) 
+        {
+            return Eigen::AngleAxisd(angle, Eigen::Vector3d::Zero());  // 返回零向量表示无显著旋转
+        }
+
+        Eigen::Vector3d axis((R(2, 1) - R(1, 2)) / (2 * sin(angle)), 
+                            (R(0, 2) - R(2, 0)) / (2 * sin(angle)), 
+                            (R(1, 0) - R(0, 1)) / (2 * sin(angle))); // 轴
+
+        return Eigen::AngleAxisd(angle, axis.normalized()); // 返回计算所得轴角 
     }
-
-    Eigen::Vector3d axis((R(2, 1) - R(1, 2)) / (2 * sin(angle)), 
-                         (R(0, 2) - R(2, 0)) / (2 * sin(angle)), 
-                         (R(1, 0) - R(0, 1)) / (2 * sin(angle))); // 轴
-
-    return Eigen::AngleAxisd(angle, axis.normalized()); // 返回计算所得轴角
+    catch (const std::exception& e)
+    {
+        handleException(e); // 调用异常处理函数
+        return Eigen::AngleAxisd(0, Eigen::Vector3d(0, 0, 1));
+    }
 }
 
 /** 
  * @brief 旋转矩阵转四元数
- * @param 旋转矩阵
+ * @param R 旋转矩阵
  * @return 四元数
  */
 Eigen::Quaterniond rotationMatrixToQuaternion(const Eigen::Matrix3d& R)
@@ -212,8 +229,8 @@ Eigen::Quaterniond rotationMatrixToQuaternion(const Eigen::Matrix3d& R)
 
 /** 
  * @brief 欧拉角转旋转矩阵
- * @param 欧拉角
- * @param 欧拉角变换顺序
+ * @param eulerAngle 欧拉角
+ * @param order 欧拉角变换顺序
  * @return 旋转矩阵
  */
 Eigen::Matrix3d eulerAngleToRotationMatrix(const Eigen::Vector3d& eulerAngle, const std::string& order)
@@ -237,8 +254,8 @@ Eigen::Matrix3d eulerAngleToRotationMatrix(const Eigen::Vector3d& eulerAngle, co
 
 /** 
  * @brief 欧拉角转轴角
- * @param 欧拉角
- * @param 欧拉角变换顺序
+ * @param eulerAngle 欧拉角
+ * @param order 欧拉角变换顺序
  * @return 轴角
  */
 Eigen::AngleAxisd eulerAngleToAxisAngle(const Eigen::Vector3d& eulerAngle, const std::string& order)
@@ -248,8 +265,8 @@ Eigen::AngleAxisd eulerAngleToAxisAngle(const Eigen::Vector3d& eulerAngle, const
 
 /** 
  * @brief 欧拉角转四元数
- * @param 欧拉角
- * @param 欧拉角变换顺序
+ * @param eulerAngle 欧拉角
+ * @param order 欧拉角变换顺序
  * @return 四元数
  */
 Eigen::Quaterniond eulerAngleToQuaternion(const Eigen::Vector3d& eulerAngle, const std::string& order)
@@ -271,7 +288,7 @@ Eigen::Quaterniond eulerAngleToQuaternion(const Eigen::Vector3d& eulerAngle, con
 
 /** 
  * @brief 轴角转旋转矩阵
- * @param 轴角
+ * @param axisAngle 轴角
  * @return 旋转矩阵
  */
 Eigen::Matrix3d axisAngleToRotationMatrix(const Eigen::AngleAxisd& axisAngle)
@@ -281,8 +298,8 @@ Eigen::Matrix3d axisAngleToRotationMatrix(const Eigen::AngleAxisd& axisAngle)
 
 /** 
  * @brief 轴角转欧拉角
- * @param 轴角
- * @param 欧拉角变换顺序
+ * @param axisAngle 轴角
+ * @param order 欧拉角变换顺序
  * @return 欧拉角
  */
 Eigen::Vector3d axisAngleToEulerAngle(const Eigen::AngleAxisd& axisAngle, const std::string& order)
@@ -296,13 +313,14 @@ Eigen::Vector3d axisAngleToEulerAngle(const Eigen::AngleAxisd& axisAngle, const 
     }
     catch (const std::exception& e)
     {
-        return handleException(e); // 调用异常处理函数
+        handleException(e); // 调用异常处理函数
+        return Eigen::Vector3d::Zero();
     } 
 }
 
 /** 
  * @brief 轴角转四元数
- * @param 轴角
+ * @param axisAngle 轴角
  * @return 四元数
  */
 Eigen::Quaterniond axisAngleToQuaternion(const Eigen::AngleAxisd& axisAngle)
@@ -312,7 +330,7 @@ Eigen::Quaterniond axisAngleToQuaternion(const Eigen::AngleAxisd& axisAngle)
 
 /** 
  * @brief 四元数转旋转矩阵
- * @param 四元数
+ * @param quaternion 四元数
  * @return 旋转矩阵
  */
 Eigen::Matrix3d quaternionToRotationMatrix(const Eigen::Quaterniond& quaternion)
@@ -322,8 +340,8 @@ Eigen::Matrix3d quaternionToRotationMatrix(const Eigen::Quaterniond& quaternion)
 
 /** 
  * @brief 四元数转欧拉角
- * @param 四元数
- * @param 欧拉角变换顺序
+ * @param quaternion 四元数
+ * @param order 欧拉角变换顺序
  * @return 欧拉角
  */
 Eigen::Vector3d quaternionToEulerAngle(const Eigen::Quaterniond& quaternion, const std::string& order)
@@ -337,13 +355,14 @@ Eigen::Vector3d quaternionToEulerAngle(const Eigen::Quaterniond& quaternion, con
     }
     catch (const std::exception& e)
     {
-        return handleException(e); // 调用异常处理函数
+        handleException(e); // 调用异常处理函数
+        return Eigen::Vector3d::Zero();
     } 
 }
 
 /** 
  * @brief 四元数转轴角
- * @param 四元数
+ * @param quaternion 四元数
  * @return 轴角
  */
 Eigen::AngleAxisd quaternionToAxisAngle(const Eigen::Quaterniond& quaternion)
