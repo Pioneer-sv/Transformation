@@ -42,9 +42,10 @@ inline Eigen::Vector3d handleException(const std::exception& e)
  * 所有矩阵和向量都继承自它，Derived是模板参数，当传入参数时，处理的对象类型自然确定下来
  */
 template <typename Derived>
-Derived roundNearZero(const Eigen::MatrixBase<Derived>& mat, double threshold = 1e-10) 
+auto roundNearZero(const Eigen::MatrixBase<Derived>& mat, double threshold = 1e-10) 
 {
-    Derived result = mat.derived(); // 确保返回具体派生类对象
+    using PlainMatrix = typename Derived::PlainObject;
+    PlainMatrix result = mat.eval(); // 确保返回具体派生类对象
 
     for (int i = 0; i < result.rows(); i++) 
     {

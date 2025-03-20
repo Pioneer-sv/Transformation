@@ -1,0 +1,3 @@
+/home/robot/MainFolder/Public/Robot/Basic/github/Transformation/transformation/build/CMakeFiles/transformation.dir
+/home/robot/MainFolder/Public/Robot/Basic/github/Transformation/transformation/build/CMakeFiles/edit_cache.dir
+/home/robot/MainFolder/Public/Robot/Basic/github/Transformation/transformation/build/CMakeFiles/rebuild_cache.dir
