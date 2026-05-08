@@ -1,123 +1,94 @@
 #include <iostream>
+#include <iomanip>
+#include <cmath>
 #include <Eigen/Dense>
 #include "transformation.h"
 
-int main()
-{
-    // 测试旋转矩阵
-    Eigen::Matrix3d rotationMatrix;
-    rotationMatrix << 1, 0, 0,
-        0, 0.707107, -0.707107,
-        0, 0.707107, 0.707107;
-    std::cout << "旋转矩阵(RotationMatrix): " << rotationMatrix << std::endl;
+// 打印辅助函数
+void print(const std::string& name, const Eigen::Matrix3d& m) {
+    std::cout << name << ":\n" << m << "\n" << std::endl;
+}
+void print(const std::string& name, const Eigen::Vector3d& v) {
+    std::cout << name << ": " << v.transpose() << std::endl;
+}
+void print(const std::string& name, const Eigen::AngleAxisd& a) {
+    std::cout << name << ": angle=" << a.angle() << " axis=" << a.axis().transpose() << std::endl;
+}
+void print(const std::string& name, const Eigen::Quaterniond& q) {
+    std::cout << name << ": " << q.coeffs().transpose() << std::endl;
+}
 
-    // 测试欧拉角
-    Eigen::Vector3d eulerAngle(M_PI / 4, 0, 0); // 假设欧拉角为(45°, 0, 0)
-    std::string order = "xyz";                  // 旋转顺序
-    std::cout << "欧拉角(EulerAngle): " << eulerAngle.transpose() << std::endl;
+// 往返测试：A -> B -> A，比较是否一致
+template<typename T>
+bool check(const std::string& label, const T& original, const T& roundtripped, double tol = 1e-6) = delete;
 
-    // 测试轴角
-    double angle = M_PI / 4;       // 45度旋转
-    Eigen::Vector3d axis(1, 0, 0); // 绕x轴旋转
-    Eigen::AngleAxisd axisAngle(angle, axis);
-    std::cout << "轴角(AngleAxis): " << axisAngle.angle() << " " << axisAngle.axis().transpose() << std::endl;
+bool check(const std::string& label, const Eigen::Vector3d& a, const Eigen::Vector3d& b, double tol = 1e-6) {
+    double diff = (a - b).norm();
+    bool ok = diff < tol;
+    std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << " (diff=" << diff << ")" << std::endl;
+    return ok;
+}
+bool check(const std::string& label, const Eigen::Matrix3d& a, const Eigen::Matrix3d& b, double tol = 1e-6) {
+    double diff = (a - b).norm();
+    bool ok = diff < tol;
+    std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << " (diff=" << diff << ")" << std::endl;
+    return ok;
+}
+bool check(const std::string& label, const Eigen::AngleAxisd& a, const Eigen::AngleAxisd& b, double tol = 1e-6) {
+    double angleDiff = std::abs(a.angle() - b.angle());
+    double axisDiff = (a.axis() - b.axis()).norm();
+    bool ok = (angleDiff < tol) && (axisDiff < tol);
+    std::cout << (ok ? "[PASS] " : "[FAIL] ") << label
+              << " (angleDiff=" << angleDiff << " axisDiff=" << axisDiff << ")" << std::endl;
+    return ok;
+}
+bool check(const std::string& label, const Eigen::Quaterniond& a, const Eigen::Quaterniond& b, double tol = 1e-6) {
+    // 四元数符号可以同时取反，取最小差异
+    double diff = std::min((a.coeffs() - b.coeffs()).norm(), (a.coeffs() + b.coeffs()).norm());
+    bool ok = diff < tol;
+    std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << " (diff=" << diff << ")" << std::endl;
+    return ok;
+}
 
-    // 测试四元数
-    Eigen::Quaterniond quaternion(0.382683, 0, 0, 0.92388);
-    std::cout << "四元数(Quaternion): " << quaternion << std::endl;
+int main() {
+    std::cout << std::fixed << std::setprecision(4);
+    const std::string order = "xyz";
 
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
+    // 初始值
+    Eigen::Matrix3d R;
+    R << 1, 0, 0,
+         0, 0.707107, -0.707107,
+         0, 0.707107, 0.707107;
+    Eigen::Vector3d euler(M_PI / 4, 0, 0);
+    Eigen::AngleAxisd axisAngle(M_PI / 4, Eigen::Vector3d::UnitX());
+    Eigen::Quaterniond quat(axisAngle);
 
-    // 1. 旋转矩阵 -> 欧拉角
-    Eigen::Vector3d eulerAngleFromMatrix = rotationMatrixToEulerAngle(rotationMatrix, order);
-    std::cout << "1. 旋转矩阵转欧拉角: " << eulerAngleFromMatrix.transpose() << std::endl;
+    int pass = 0, total = 0;
 
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
+    // 旋转矩阵往返测试
+    std::cout << "=== 旋转矩阵往返测试 ===" << std::endl;
+    pass += check("R->Euler->R",    R, eulerAngleToRotationMatrix(rotationMatrixToEulerAngle(R, order), order)); total++;
+    pass += check("R->AxisAng->R",  R, axisAngleToRotationMatrix(rotationMatrixToAxisAngle(R)));                    total++;
+    pass += check("R->Quat->R",     R, quaternionToRotationMatrix(rotationMatrixToQuaternion(R)));                   total++;
 
-    // 2. 旋转矩阵 -> 轴角
-    Eigen::AngleAxisd axisAngleFromMatrix = rotationMatrixToAxisAngle(rotationMatrix);
-    std::cout << "2. 旋转矩阵转轴角: \n"
-              << axisAngleFromMatrix.angle() << " "
-              << axisAngleFromMatrix.axis().transpose() << std::endl;
+    // 欧拉角往返测试
+    std::cout << "\n=== 欧拉角往返测试 ===" << std::endl;
+    pass += check("Euler->R->Euler",      euler, rotationMatrixToEulerAngle(eulerAngleToRotationMatrix(euler, order), order)); total++;
+    pass += check("Euler->AxisAng->Euler", euler, axisAngleToEulerAngle(eulerAngleToAxisAngle(euler, order), order));      total++;
+    pass += check("Euler->Quat->Euler",    euler, quaternionToEulerAngle(eulerAngleToQuaternion(euler, order), order));     total++;
 
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
+    // 轴角往返测试
+    std::cout << "\n=== 轴角往返测试 ===" << std::endl;
+    pass += check("AxisAng->R->AxisAng",      axisAngle, rotationMatrixToAxisAngle(axisAngleToRotationMatrix(axisAngle)));      total++;
+    pass += check("AxisAng->Euler->AxisAng",  axisAngle, eulerAngleToAxisAngle(axisAngleToEulerAngle(axisAngle, order), order)); total++;
+    pass += check("AxisAng->Quat->AxisAng",   axisAngle, quaternionToAxisAngle(axisAngleToQuaternion(axisAngle)));               total++;
 
-    // 3. 旋转矩阵 -> 四元数
-    Eigen::Quaterniond quaternionFromMatrix = rotationMatrixToQuaternion(rotationMatrix);
-    std::cout << "3. 旋转矩阵转四元数: " << quaternionFromMatrix.coeffs().transpose() << std::endl;
+    // 四元数往返测试
+    std::cout << "\n=== 四元数往返测试 ===" << std::endl;
+    pass += check("Quat->R->Quat",      quat, rotationMatrixToQuaternion(quaternionToRotationMatrix(quat)));                   total++;
+    pass += check("Quat->Euler->Quat",  quat, eulerAngleToQuaternion(quaternionToEulerAngle(quat, order), order));             total++;
+    pass += check("Quat->AxisAng->Quat", quat, axisAngleToQuaternion(quaternionToAxisAngle(quat)));                             total++;
 
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 4. 欧拉角 -> 旋转矩阵
-    Eigen::Matrix3d rotationFromMatrix = eulerAngleToRotationMatrix(eulerAngle, order);
-    std::cout << "4. 欧拉角转旋转矩阵: \n"
-              << rotationFromMatrix << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 5. 欧拉角 -> 轴角
-    Eigen::AngleAxisd axisAngleFromEuler = eulerAngleToAxisAngle(eulerAngle, order);
-    std::cout << "5. 欧拉角转轴角: \n"
-              << axisAngleFromEuler.angle() << " "
-              << axisAngleFromEuler.axis().transpose() << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 6. 欧拉角 -> 四元数
-    Eigen::Quaterniond quaternionFromEuler = eulerAngleToQuaternion(eulerAngle, order);
-    std::cout << "6. 欧拉角转四元数: " << quaternionFromEuler.coeffs().transpose() << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 7. 轴角 -> 旋转矩阵
-    Eigen::Matrix3d rotationMatrixFromAxisAngle = axisAngleToRotationMatrix(axisAngle);
-    std::cout << "7. 轴角转旋转矩阵: \n"
-              << rotationMatrixFromAxisAngle << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 8. 轴角 -> 欧拉角
-    Eigen::Vector3d eulerFromAxisAngle = axisAngleToEulerAngle(axisAngle, order);
-    std::cout << "8. 轴角转欧拉角: " << eulerFromAxisAngle.transpose() << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 9. 轴角 -> 四元数
-    Eigen::Quaterniond quaternionFromAxisAngle = axisAngleToQuaternion(axisAngle);
-    std::cout << "9. 轴角转四元数: " << quaternionFromAxisAngle.coeffs().transpose() << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 10. 四元数 -> 旋转矩阵
-    Eigen::Matrix3d rotationMatrixFromQuaternion = quaternionToRotationMatrix(quaternion);
-    std::cout << "10. 四元数转旋转矩阵: \n"
-              << rotationMatrixFromQuaternion << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 11. 四元数 -> 欧拉角
-    Eigen::Vector3d eulerFromQuaternion = quaternionToEulerAngle(quaternion, order);
-    std::cout << "11. 四元数转欧拉角: " << eulerFromQuaternion.transpose() << std::endl;
-
-    // 分隔符
-    std::cout << "----------------------------------------------------" << std::endl;
-
-    // 12. 四元数 -> 轴角
-    Eigen::AngleAxisd axisAngleFromQuaternion = quaternionToAxisAngle(quaternion);
-    std::cout << "12. 四元数转轴角: \n"
-              << axisAngleFromQuaternion.angle() << " "
-              << axisAngleFromQuaternion.axis().transpose() << std::endl;
-
-    return 0;
+    std::cout << "\n=== 结果: " << pass << "/" << total << " 通过 ===" << std::endl;
+    return pass == total ? 0 : 1;
 }

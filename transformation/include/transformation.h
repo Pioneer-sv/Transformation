@@ -12,9 +12,6 @@
 #include <functional>
 #include <unordered_map>
 
-// 启用C++标准数学库中的常量
-#define _USE_MATH_DEFINES
-
 // 旋转序列映射表
 static const std::unordered_map<std::string, std::array<int, 3>> orderMap = 
 {
@@ -49,7 +46,7 @@ inline std::array<int, 3> parseOrder(const std::string& order)
  * @brief 判断旋转矩阵是否正交
  * @param order 要判断的旋转矩阵
  */
-void rotationMatrixIsUnitary(const Eigen::Matrix3d& R)
+inline void rotationMatrixIsUnitary(const Eigen::Matrix3d& R)
 {
     if (!R.isUnitary())
     {
@@ -164,7 +161,7 @@ inline Eigen::AngleAxisd Z(const Eigen::Vector3d& eulerAngle, int n)
  * @param order 欧拉角变换顺序
  * @return 欧拉角
  */
-Eigen::Vector3d rotationMatrixToEulerAngle(const Eigen::Matrix3d& R, const std::string& order)
+inline Eigen::Vector3d rotationMatrixToEulerAngle(const Eigen::Matrix3d& R, const std::string& order)
 {
     try 
     {
@@ -188,7 +185,7 @@ Eigen::Vector3d rotationMatrixToEulerAngle(const Eigen::Matrix3d& R, const std::
  * @param R 旋转矩阵
  * @return 轴角
  */
-Eigen::AngleAxisd rotationMatrixToAxisAngle(const Eigen::Matrix3d& R)
+inline Eigen::AngleAxisd rotationMatrixToAxisAngle(const Eigen::Matrix3d& R)
 {
     try 
     {
@@ -222,7 +219,7 @@ Eigen::AngleAxisd rotationMatrixToAxisAngle(const Eigen::Matrix3d& R)
  * @param R 旋转矩阵
  * @return 四元数
  */
-Eigen::Quaterniond rotationMatrixToQuaternion(const Eigen::Matrix3d& R)
+inline Eigen::Quaterniond rotationMatrixToQuaternion(const Eigen::Matrix3d& R)
 {
     return Eigen::Quaterniond(R);
 }
@@ -233,10 +230,10 @@ Eigen::Quaterniond rotationMatrixToQuaternion(const Eigen::Matrix3d& R)
  * @param order 欧拉角变换顺序
  * @return 旋转矩阵
  */
-Eigen::Matrix3d eulerAngleToRotationMatrix(const Eigen::Vector3d& eulerAngle, const std::string& order)
+inline Eigen::Matrix3d eulerAngleToRotationMatrix(const Eigen::Vector3d& eulerAngle, const std::string& order)
 {
     // 创建旋转矩阵映射表，用于将旋转序列映射到对应的匿名函数对象上
-    static const std::unordered_map<char, std::function<Eigen::Matrix3d(int)>> rotationMap =
+    const std::unordered_map<char, std::function<Eigen::Matrix3d(int)>> rotationMap =
         {
             {'x', [&](int n) { return XR(eulerAngle, n); }},
             {'y', [&](int n) { return YR(eulerAngle, n); }},
@@ -258,7 +255,7 @@ Eigen::Matrix3d eulerAngleToRotationMatrix(const Eigen::Vector3d& eulerAngle, co
  * @param order 欧拉角变换顺序
  * @return 轴角
  */
-Eigen::AngleAxisd eulerAngleToAxisAngle(const Eigen::Vector3d& eulerAngle, const std::string& order)
+inline Eigen::AngleAxisd eulerAngleToAxisAngle(const Eigen::Vector3d& eulerAngle, const std::string& order)
 {
     return rotationMatrixToAxisAngle(eulerAngleToRotationMatrix(eulerAngle, order)); // 欧拉角先转为旋转矩阵，再转为轴角
 }
@@ -269,9 +266,9 @@ Eigen::AngleAxisd eulerAngleToAxisAngle(const Eigen::Vector3d& eulerAngle, const
  * @param order 欧拉角变换顺序
  * @return 四元数
  */
-Eigen::Quaterniond eulerAngleToQuaternion(const Eigen::Vector3d& eulerAngle, const std::string& order)
+inline Eigen::Quaterniond eulerAngleToQuaternion(const Eigen::Vector3d& eulerAngle, const std::string& order)
 {
-    static const std::unordered_map<char, std::function<Eigen::AngleAxisd(int)>> rotationMap = 
+    const std::unordered_map<char, std::function<Eigen::AngleAxisd(int)>> rotationMap =
         {
             {'x', [&](int n) { return X(eulerAngle, n); }},
             {'y', [&](int n) { return Y(eulerAngle, n); }},
@@ -291,7 +288,7 @@ Eigen::Quaterniond eulerAngleToQuaternion(const Eigen::Vector3d& eulerAngle, con
  * @param axisAngle 轴角
  * @return 旋转矩阵
  */
-Eigen::Matrix3d axisAngleToRotationMatrix(const Eigen::AngleAxisd& axisAngle)
+inline Eigen::Matrix3d axisAngleToRotationMatrix(const Eigen::AngleAxisd& axisAngle)
 {
     return roundNearZero(axisAngle.toRotationMatrix());
 }
@@ -302,7 +299,7 @@ Eigen::Matrix3d axisAngleToRotationMatrix(const Eigen::AngleAxisd& axisAngle)
  * @param order 欧拉角变换顺序
  * @return 欧拉角
  */
-Eigen::Vector3d axisAngleToEulerAngle(const Eigen::AngleAxisd& axisAngle, const std::string& order)
+inline Eigen::Vector3d axisAngleToEulerAngle(const Eigen::AngleAxisd& axisAngle, const std::string& order)
 {
     try 
     {
@@ -323,7 +320,7 @@ Eigen::Vector3d axisAngleToEulerAngle(const Eigen::AngleAxisd& axisAngle, const 
  * @param axisAngle 轴角
  * @return 四元数
  */
-Eigen::Quaterniond axisAngleToQuaternion(const Eigen::AngleAxisd& axisAngle)
+inline Eigen::Quaterniond axisAngleToQuaternion(const Eigen::AngleAxisd& axisAngle)
 {
     return Eigen::Quaterniond(axisAngle);
 }
@@ -333,7 +330,7 @@ Eigen::Quaterniond axisAngleToQuaternion(const Eigen::AngleAxisd& axisAngle)
  * @param quaternion 四元数
  * @return 旋转矩阵
  */
-Eigen::Matrix3d quaternionToRotationMatrix(const Eigen::Quaterniond& quaternion)
+inline Eigen::Matrix3d quaternionToRotationMatrix(const Eigen::Quaterniond& quaternion)
 {
     return roundNearZero(Eigen::Matrix3d(quaternion.toRotationMatrix()));
 }
@@ -344,7 +341,7 @@ Eigen::Matrix3d quaternionToRotationMatrix(const Eigen::Quaterniond& quaternion)
  * @param order 欧拉角变换顺序
  * @return 欧拉角
  */
-Eigen::Vector3d quaternionToEulerAngle(const Eigen::Quaterniond& quaternion, const std::string& order)
+inline Eigen::Vector3d quaternionToEulerAngle(const Eigen::Quaterniond& quaternion, const std::string& order)
 {
     try 
     {
@@ -365,7 +362,7 @@ Eigen::Vector3d quaternionToEulerAngle(const Eigen::Quaterniond& quaternion, con
  * @param quaternion 四元数
  * @return 轴角
  */
-Eigen::AngleAxisd quaternionToAxisAngle(const Eigen::Quaterniond& quaternion)
+inline Eigen::AngleAxisd quaternionToAxisAngle(const Eigen::Quaterniond& quaternion)
 {
     return rotationMatrixToAxisAngle(quaternionToRotationMatrix(quaternion)); // 四元数先转为旋转矩阵，再转为轴角
 }
