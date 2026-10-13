@@ -9,3 +9,6 @@ compile_commands.json
 *.o
 *.a
 *.so
+
+# 本地资料（结构图、CI 截图等本机留存，不进版本库）
+图片/
