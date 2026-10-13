@@ -6,8 +6,11 @@
  *   cmake -S . -B build -DTRANSFORMATION_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
  *   cmake --build build -j && ./build/benchmarks/benchmark_transformation
  *
- * 基准写法说明：转换类接口的输入取自预先算好的数组并按下标轮转，避免编译器把常量输入的计算
- * 提出循环（常量折叠 / LICM）从而测出空壳；"ours" 与 "eigen" 两组只差调用的实现。
+ * 基准写法说明：
+ *  1. 转换类接口的输入取自预先算好的数组并按下标轮转，避免编译器把常量输入的计算提出循环
+ *     （常量折叠 / LICM）从而测出空壳；"ours" 与 "eigen" 两组只差调用的实现；
+ *  2. DoNotOptimize 一律传非 const 左值：Google Benchmark 1.8 起 DoNotOptimize(const Tp&) 已废弃，
+ *     传 const 对象会触发 deprecated 警告（CI 开了 -Werror）。
  */
 
 #include <cmath>
@@ -99,8 +102,8 @@ static void BM_RoundNearZeroFixed(benchmark::State& state)
 
     for (auto _ : state)
     {
-        const Eigen::Matrix3d output = vectorized ? roundNearZero(input) : roundNearZeroLoop(input);
-        benchmark::DoNotOptimize(output.data());
+        Eigen::Matrix3d output = vectorized ? roundNearZero(input) : roundNearZeroLoop(input);
+        benchmark::DoNotOptimize(output);
     }
 }
 BENCHMARK(BM_RoundNearZeroFixed)->Arg(0)->Arg(1)->Unit(benchmark::kNanosecond);
@@ -138,13 +141,13 @@ static void BM_EulerToRotationMatrix(benchmark::State& state)
     for (auto _ : state)
     {
         const Eigen::Vector3d& euler = eulers[index++ % eulers.size()];
-        const Eigen::Matrix3d result =
+        Eigen::Matrix3d result =
                 ours ? eulerAngleToRotationMatrix(euler, "xyz")
                      : (Eigen::AngleAxisd(euler[0], Eigen::Vector3d::UnitX()) *
                         Eigen::AngleAxisd(euler[1], Eigen::Vector3d::UnitY()) *
                         Eigen::AngleAxisd(euler[2], Eigen::Vector3d::UnitZ()))
                                .toRotationMatrix();
-        benchmark::DoNotOptimize(result.data());
+        benchmark::DoNotOptimize(result);
     }
 }
 BENCHMARK(BM_EulerToRotationMatrix)->Arg(0)->Arg(1)->Unit(benchmark::kNanosecond);
@@ -158,8 +161,8 @@ static void BM_MatrixToQuaternion(benchmark::State& state)
     for (auto _ : state)
     {
         const Eigen::Matrix3d& matrix = matrices[index++ % matrices.size()];
-        const Eigen::Quaterniond result = ours ? rotationMatrixToQuaternion(matrix) : Eigen::Quaterniond(matrix);
-        benchmark::DoNotOptimize(result.coeffs().data());
+        Eigen::Quaterniond result = ours ? rotationMatrixToQuaternion(matrix) : Eigen::Quaterniond(matrix);
+        benchmark::DoNotOptimize(result);
     }
 }
 BENCHMARK(BM_MatrixToQuaternion)->Arg(0)->Arg(1)->Unit(benchmark::kNanosecond);
@@ -173,8 +176,8 @@ static void BM_MatrixToAxisAngle(benchmark::State& state)
     for (auto _ : state)
     {
         const Eigen::Matrix3d& matrix = matrices[index++ % matrices.size()];
-        const Eigen::AngleAxisd result = ours ? rotationMatrixToAxisAngle(matrix) : Eigen::AngleAxisd(matrix);
-        benchmark::DoNotOptimize(result.axis().data());
+        Eigen::AngleAxisd result = ours ? rotationMatrixToAxisAngle(matrix) : Eigen::AngleAxisd(matrix);
+        benchmark::DoNotOptimize(result);
     }
 }
 BENCHMARK(BM_MatrixToAxisAngle)->Arg(0)->Arg(1)->Unit(benchmark::kNanosecond);
@@ -187,8 +190,8 @@ static void BM_MatrixToRotationVector(benchmark::State& state)
     for (auto _ : state)
     {
         const Eigen::Matrix3d& matrix = matrices[index++ % matrices.size()];
-        const Eigen::Vector3d result = rotationMatrixToRotationVector(matrix);
-        benchmark::DoNotOptimize(result.data());
+        Eigen::Vector3d result = rotationMatrixToRotationVector(matrix);
+        benchmark::DoNotOptimize(result);
     }
 }
 BENCHMARK(BM_MatrixToRotationVector)->Unit(benchmark::kNanosecond);
@@ -203,8 +206,8 @@ static void BM_Slerp(benchmark::State& state)
     for (auto _ : state)
     {
         const Eigen::Quaterniond& to = quaternions[index++ % quaternions.size()];
-        const Eigen::Quaterniond result = ours ? slerp(from, to, 0.37) : from.slerp(0.37, to);
-        benchmark::DoNotOptimize(result.coeffs().data());
+        Eigen::Quaterniond result = ours ? slerp(from, to, 0.37) : from.slerp(0.37, to);
+        benchmark::DoNotOptimize(result);
     }
 }
 BENCHMARK(BM_Slerp)->Arg(0)->Arg(1)->Unit(benchmark::kNanosecond);
@@ -219,8 +222,7 @@ static void BM_RotationDistance(benchmark::State& state)
     for (auto _ : state)
     {
         const Eigen::Quaterniond& to = quaternions[index++ % quaternions.size()];
-        const double result =
-                ours ? rotationDistance(from, to) : 2.0 * std::acos(std::min(1.0, std::abs(from.dot(to))));
+        double result = ours ? rotationDistance(from, to) : 2.0 * std::acos(std::min(1.0, std::abs(from.dot(to))));
         benchmark::DoNotOptimize(result);
     }
 }
@@ -236,8 +238,8 @@ static void BM_SquadEvaluate(benchmark::State& state)
     double u = 0.0;
     for (auto _ : state)
     {
-        const Eigen::Matrix3d result = spline.evaluateMatrix(u);
-        benchmark::DoNotOptimize(result.data());
+        Eigen::Matrix3d result = spline.evaluateMatrix(u);
+        benchmark::DoNotOptimize(result);
 
         u += 0.001;
         if (u > 7.0)

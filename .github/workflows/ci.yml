@@ -111,6 +111,7 @@ jobs:
         run: |
           set -o pipefail
           gcovr --version
+          mkdir -p coverage
           gcovr --root . --filter 'include/' --exclude 'tests/' --exclude 'examples/' \
                 --html-details coverage/index.html --print-summary 2>&1 | tee coverage.log || {
             tail -30 coverage.log | while IFS= read -r line; do echo "::error title=coverage::$line"; done
