@@ -83,5 +83,24 @@ int main()
     }
 
     std::cout << "\n结果: " << passed << "/" << cases.size() << " 通过\n";
+
+    // ---------------- 旋转向量（李代数 so(3)）与姿态插值 ----------------
+    std::cout << "\n=== 旋转向量：指数/对数映射 ===\n";
+    const Eigen::Vector3d rotationVector(0.2, -0.4, 0.6);
+    const Eigen::Matrix3d Rv = rotationVectorToRotationMatrix(rotationVector);
+    std::cout << "旋转向量 " << rotationVector.transpose() << "  →  旋转角 " << rotationAngle(Rv)
+              << "（模长 " << rotationVector.norm() << "）\n";
+    std::cout << "对数映射回到旋转向量: " << rotationMatrixToRotationVector(Rv).transpose() << "\n";
+
+    std::cout << "\n=== 姿态插值：从单位旋转到绕 z 轴 90° ===\n";
+    const Eigen::Quaterniond start = Eigen::Quaterniond::Identity();
+    const Eigen::Quaterniond goal = eulerAngleToQuaternion(Eigen::Vector3d(0.0, 0.0, M_PI / 2.0), "xyz");
+    for (double t = 0.0; t <= 1.0001; t += 0.25)
+    {
+        const Eigen::Quaterniond current = slerp(start, goal, t);
+        std::cout << "  t = " << t << "  与起点的夹角 = " << rotationDistance(start, current)
+                  << "  旋转向量 = " << quaternionToRotationVector(current).transpose() << "\n";
+    }
+
     return passed == static_cast<int>(cases.size()) ? 0 : 1;
 }

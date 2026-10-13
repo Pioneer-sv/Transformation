@@ -185,6 +185,18 @@ void testRoundTrips()
             CHECK(rotationError(quaternionToRotationMatrix(axisAngleToQuaternion(aa)), R) < kTol);
             CHECK(rotationError(axisAngleToRotationMatrix(quaternionToAxisAngle(q)), R) < kTol);
             CHECK(quaternionError(rotationMatrixToQuaternion(quaternionToRotationMatrix(q)), q) < kTol);
+
+            // 旋转向量：与四种表示互转后仍回到同一旋转
+            const Eigen::Vector3d rv = rotationMatrixToRotationVector(R);
+            CHECK(rotationError(rotationVectorToRotationMatrix(rv), R) < kTol);
+            CHECK(rotationError(quaternionToRotationMatrix(rotationVectorToQuaternion(rv)), R) < kTol);
+            CHECK(rotationError(axisAngleToRotationMatrix(rotationVectorToAxisAngle(rv)), R) < kTol);
+            CHECK(rotationError(eulerAngleToRotationMatrix(rotationVectorToEulerAngle(rv, order), order), R) < kTol);
+
+            // 反向：其它表示的对数应与 R 的对数一致（同一旋转对应同一最短弧向量）
+            CHECK((quaternionToRotationVector(q) - rv).norm() < kTol);
+            CHECK((axisAngleToRotationVector(aa) - rv).norm() < kTol);
+            CHECK((eulerAngleToRotationVector(euler, order) - rv).norm() < kTol);
         }
     }
 }
@@ -327,6 +339,150 @@ void testProperties()
     }
 }
 
+void testRotationVector()
+{
+    // 已知值：绕 z 轴 90°
+    Eigen::Matrix3d expectedZ90;
+    expectedZ90 << 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+    const Eigen::Vector3d rotationVector(0.0, 0.0, M_PI / 2.0);
+
+    CHECK((rotationVectorToRotationMatrix(rotationVector) - expectedZ90).norm() < kTol);
+    CHECK(rotationError(quaternionToRotationMatrix(rotationVectorToQuaternion(rotationVector)), expectedZ90) < kTol);
+    CHECK((axisAngleToRotationMatrix(rotationVectorToAxisAngle(rotationVector)) - expectedZ90).norm() < kTol);
+    CHECK((rotationVectorToEulerAngle(rotationVector, "xyz") - Eigen::Vector3d(0.0, 0.0, M_PI / 2.0)).norm() < kTol);
+
+    // 指数/对数互逆：|v| < π 时应逐元素还原
+    std::mt19937 gen(20241014);
+    std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+    for (int i = 0; i < kRandomSamples; ++i)
+    {
+        Eigen::Vector3d v(uniform(gen), uniform(gen), uniform(gen));
+        v *= (0.99 * M_PI) / v.norm(); // 避开 π：该处轴符号不唯一
+
+        CHECK((rotationMatrixToRotationVector(rotationVectorToRotationMatrix(v)) - v).norm() < 1e-9);
+        CHECK((quaternionToRotationVector(rotationVectorToQuaternion(v)) - v).norm() < 1e-9);
+        CHECK((axisAngleToRotationVector(rotationVectorToAxisAngle(v)) - v).norm() < 1e-9);
+        CHECK((eulerAngleToRotationVector(rotationVectorToEulerAngle(v, "zyx"), "zyx") - v).norm() < 1e-9);
+        CHECK(std::abs(rotationAngle(rotationVectorToRotationMatrix(v)) - v.norm()) < 1e-9);
+    }
+
+    // θ → 0：泰勒分支仍应保持精度（旧式 0/0 会直接出 NaN）
+    for (const double tiny : {1e-3, 1e-6, 1e-8})
+    {
+        const Eigen::Vector3d v(1e-7, -2e-7, tiny);
+        CHECK((rotationMatrixToRotationVector(rotationVectorToRotationMatrix(v)) - v).norm() < 1e-9);
+        CHECK((quaternionToRotationVector(rotationVectorToQuaternion(v)) - v).norm() < 1e-9);
+    }
+    CHECK(rotationVectorToRotationMatrix(Eigen::Vector3d::Zero()).isApprox(Eigen::Matrix3d::Identity(), kTol));
+    CHECK(rotationMatrixToRotationVector(Eigen::Matrix3d::Identity()).norm() < kTol);
+
+    // θ = π：模长保持 π，轴符号不唯一但旋转必须一致
+    Eigen::Vector3d axis(1.0, 2.0, 3.0);
+    axis.normalize();
+    const Eigen::Matrix3d Rpi = rotationVectorToRotationMatrix(M_PI * axis);
+    const Eigen::Vector3d back = rotationMatrixToRotationVector(Rpi);
+    CHECK(std::abs(back.norm() - M_PI) < 1e-6);
+    CHECK(std::abs(std::abs(back.normalized().dot(axis)) - 1.0) < 1e-6); // back 是模长 π 的旋转向量，方向才是轴
+    CHECK(rotationError(rotationVectorToRotationMatrix(back), Rpi) < 1e-6);
+
+    // |v| > π：对数映射给出最短弧
+    const Eigen::Matrix3d Ry = rotationVectorToRotationMatrix(1.5 * M_PI * Eigen::Vector3d::UnitY());
+    const Eigen::Vector3d shortest = rotationMatrixToRotationVector(Ry);
+    CHECK(std::abs(shortest.norm() - 0.5 * M_PI) < 1e-9);
+    CHECK(rotationError(rotationVectorToRotationMatrix(shortest), Ry) < 1e-9);
+
+    // q 与 −q 表示同一旋转，对数映射必须一致
+    const Eigen::Quaterniond q(0.5, 0.5, 0.5, 0.5);
+    CHECK((quaternionToRotationVector(Eigen::Quaterniond(-q.coeffs())) - quaternionToRotationVector(q)).norm() < kTol);
+
+    // 非单位四元数同样可接受
+    CHECK((quaternionToRotationVector(Eigen::Quaterniond(3.0 * q.coeffs())) - quaternionToRotationVector(q)).norm() < kTol);
+}
+
+void testInterpolation()
+{
+    const Eigen::Quaterniond from = Eigen::Quaterniond::Identity();
+    const Eigen::Quaterniond to = Eigen::Quaterniond(Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ()));
+
+    // 端点必须精确落在起止旋转上
+    CHECK(quaternionError(slerp(from, to, 0.0), from) < kTol);
+    CHECK(quaternionError(slerp(from, to, 1.0), to) < kTol);
+
+    // 匀速：t 处的夹角应为总夹角的 t 倍
+    const double total = rotationDistance(from, to);
+    CHECK(std::abs(total - M_PI / 2.0) < kTol);
+    for (const double t : {0.25, 0.5, 0.75})
+    {
+        CHECK(std::abs(rotationDistance(from, slerp(from, to, t)) - t * total) < kTol);
+    }
+
+    // 双覆盖：q 与 −q 是同一旋转，插值结果必须一致
+    CHECK(quaternionError(slerp(from, Eigen::Quaterniond(-to.coeffs()), 0.5), slerp(from, to, 0.5)) < kTol);
+
+    // 与 Eigen 内置 slerp 对拍
+    std::mt19937 gen(11);
+    for (int i = 0; i < 50; ++i)
+    {
+        const Eigen::Quaterniond a = randomUnitQuaternion(gen);
+        const Eigen::Quaterniond b = randomUnitQuaternion(gen);
+        CHECK(quaternionError(slerp(a, b, 0.3), a.slerp(0.3, b)) < 1e-9);
+    }
+
+    // 矩阵 / 轴角插值应与四元数插值一致
+    const Eigen::Matrix3d Ra = eulerAngleToRotationMatrix(Eigen::Vector3d(0.2, -0.3, 0.4), "xyz");
+    const Eigen::Matrix3d Rb = eulerAngleToRotationMatrix(Eigen::Vector3d(-0.5, 0.1, 0.9), "xyz");
+    const Eigen::Matrix3d half = interpolate(Ra, Rb, 0.5);
+    CHECK(rotationError(half, slerp(rotationMatrixToQuaternion(Ra), rotationMatrixToQuaternion(Rb), 0.5).toRotationMatrix()) <
+          kTol);
+    CHECK(rotationError(axisAngleToRotationMatrix(
+                               interpolate(rotationMatrixToAxisAngle(Ra), rotationMatrixToAxisAngle(Rb), 0.5)),
+                       half) < 1e-9);
+
+    // 插值中间结果仍是合法旋转
+    CHECK(rotationMatrixIsUnitary(half));
+    CHECK(rotationMatrixIsUnitary(interpolate(Ra, Rb, 0.37)));
+    CHECK(rotationMatrixIsUnitary(interpolate(Ra, Rb, 1.4))); // 外插同样合法
+
+    // 非法输入
+    CHECK_THROWS(slerp(Eigen::Quaterniond(0.0, 0.0, 0.0, 0.0), to, 0.5), std::invalid_argument);
+    CHECK_THROWS(interpolate(Eigen::Matrix3d::Zero(), Rb, 0.5), std::invalid_argument);
+}
+
+void testRotationMetrics()
+{
+    CHECK(rotationAngle(Eigen::Matrix3d::Identity()) < kTol);
+    CHECK(std::abs(rotationAngle(rotZ(M_PI / 2.0)) - M_PI / 2.0) < kTol);
+    CHECK(std::abs(rotationAngle(rotX(M_PI)) - M_PI) < 1e-9);
+
+    const Eigen::Matrix3d Ra = eulerAngleToRotationMatrix(Eigen::Vector3d(0.3, -0.2, 0.5), "xyz");
+    const Eigen::Matrix3d Rb = eulerAngleToRotationMatrix(Eigen::Vector3d(-0.4, 0.6, -0.1), "xyz");
+    const Eigen::Matrix3d Q = eulerAngleToRotationMatrix(Eigen::Vector3d(0.9, 0.2, -0.7), "zyx");
+
+    CHECK(rotationDistance(Ra, Ra) < kTol);
+    CHECK(std::abs(rotationDistance(Ra, Rb) - rotationDistance(Rb, Ra)) < kTol);
+    CHECK(std::abs(rotationDistance(Ra, Rb) - rotationAngle(Ra.transpose() * Rb)) < kTol);
+    CHECK(rotationDistance(Ra, Rb) <= M_PI + kTol);
+
+    // 双不变性：两侧同乘同一旋转，测地线距离不变
+    CHECK(std::abs(rotationDistance(Q * Ra, Q * Rb) - rotationDistance(Ra, Rb)) < kTol);
+    CHECK(std::abs(rotationDistance(Ra * Q, Rb * Q) - rotationDistance(Ra, Rb)) < kTol);
+
+    // 四元数重载与矩阵一致，且对 q 与 −q 不敏感
+    const Eigen::Quaterniond qa(Ra);
+    const Eigen::Quaterniond qb(Rb);
+    CHECK(std::abs(rotationDistance(qa, qb) - rotationDistance(Ra, Rb)) < kTol);
+    CHECK(std::abs(rotationDistance(qa, Eigen::Quaterniond(-qb.coeffs())) - rotationDistance(qa, qb)) < kTol);
+
+    // 小角度精度：1e-8 rad 也要算准（2·acos(|dot|) 在这个量级会严重失真）
+    const Eigen::Matrix3d small = rotationVectorToRotationMatrix(Eigen::Vector3d(1e-8, 0.0, 0.0));
+    CHECK(std::abs(rotationDistance(Eigen::Matrix3d::Identity(), small) - 1e-8) < 1e-12);
+    CHECK(std::abs(rotationDistance(Eigen::Quaterniond::Identity(), Eigen::Quaterniond(small)) - 1e-8) < 1e-12);
+
+    // 非法输入
+    CHECK_THROWS(rotationDistance(Eigen::Matrix3d::Zero(), Rb), std::invalid_argument);
+    CHECK_THROWS(rotationDistance(Eigen::Quaterniond(0.0, 0.0, 0.0, 0.0), qb), std::invalid_argument);
+}
+
 } // namespace
 
 int main()
@@ -338,6 +494,9 @@ int main()
     runGroup("边界：恒等 / 180° / 万向锁 / 零轴", testEdgeCases);
     runGroup("异常：非法矩阵与非法序列", testErrorHandling);
     runGroup("roundNearZero：置零与类型保持", testRoundNearZero);
+    runGroup("旋转向量：指数/对数映射与边界", testRotationVector);
+    runGroup("插值：slerp 与测地线一致性", testInterpolation);
+    runGroup("度量：旋转角与测地线距离", testRotationMetrics);
     runGroup("性质：输出仍是合法旋转", testProperties);
 
     std::cout << "\n共 " << g_checks << " 项断言，" << g_failures << " 项失败\n";

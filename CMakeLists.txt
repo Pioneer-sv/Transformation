@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(Transformation
-        VERSION 2.0.0
+        VERSION 2.1.0
         DESCRIPTION "基于 Eigen 的旋转表示转换库（旋转矩阵 / 欧拉角 / 轴角 / 四元数）"
         LANGUAGES CXX)
 
