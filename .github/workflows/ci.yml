@@ -53,3 +53,65 @@ jobs:
 
       - name: 测试
         run: ctest --test-dir build-asan --output-on-failure
+
+  benchmarks:
+    name: 性能基准
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: sudo apt-get update && sudo apt-get install -y libeigen3-dev libbenchmark-dev
+
+      - name: 配置
+        run: >
+          cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release
+          -DTRANSFORMATION_BUILD_BENCHMARKS=ON -DTRANSFORMATION_WARNINGS_AS_ERRORS=ON
+
+      - name: 构建
+        run: cmake --build build-bench -j
+
+      - name: 运行基准
+        run: >
+          ./build-bench/benchmarks/benchmark_transformation
+          --benchmark_min_time=0.1 --benchmark_format=console | tee benchmark-results.txt
+
+      - name: 上传基准结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+
+  coverage:
+    name: 覆盖率
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update && sudo apt-get install -y libeigen3-dev
+          python3 -m pip install --user gcovr
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: 配置
+        run: cmake -S . -B build-cov -DCMAKE_BUILD_TYPE=Debug -DTRANSFORMATION_ENABLE_COVERAGE=ON
+
+      - name: 构建
+        run: cmake --build build-cov -j
+
+      - name: 测试
+        run: ctest --test-dir build-cov --output-on-failure
+
+      - name: 生成覆盖率报告
+        run: >
+          gcovr --root . --filter 'include/' --exclude 'tests/' --exclude 'examples/'
+          --html-details coverage/index.html --print-summary
+
+      - name: 上传覆盖率报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/

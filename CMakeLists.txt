@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(Transformation
-        VERSION 2.1.0
+        VERSION 2.2.0
         DESCRIPTION "基于 Eigen 的旋转表示转换库（旋转矩阵 / 欧拉角 / 轴角 / 四元数）"
         LANGUAGES CXX)
 
@@ -29,9 +29,22 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
+# ---------------------------------------------------------------- 覆盖率
+if(TRANSFORMATION_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(WARNING "覆盖率统计仅支持 GCC/Clang")
+    else()
+        add_compile_options(--coverage -O0 -g)
+        add_link_options(--coverage)
+        message(STATUS "已开启覆盖率统计（--coverage）")
+    endif()
+endif()
+
 # ---------------------------------------------------------------- 可选目标
 option(TRANSFORMATION_BUILD_TESTS "构建测试" ON)
 option(TRANSFORMATION_BUILD_EXAMPLES "构建示例程序" ON)
+option(TRANSFORMATION_BUILD_BENCHMARKS "构建性能基准（需要 Google Benchmark）" OFF)
+option(TRANSFORMATION_ENABLE_COVERAGE "开启覆盖率统计（GCC/Clang 的 --coverage）" OFF)
 
 if(TRANSFORMATION_BUILD_TESTS)
     enable_testing()
@@ -40,6 +53,10 @@ endif()
 
 if(TRANSFORMATION_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(TRANSFORMATION_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
 # ---------------------------------------------------------------- 安装

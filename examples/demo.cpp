@@ -102,5 +102,25 @@ int main()
                   << "  旋转向量 = " << quaternionToRotationVector(current).transpose() << "\n";
     }
 
+    // ---------------- 球面样条（squad）：多路点姿态轨迹 ----------------
+    std::cout << "\n=== 球面样条 squad：4 个路点之间的平滑轨迹 ===\n";
+    std::vector<Eigen::Quaterniond> waypoints;
+    for (int i = 0; i < 4; ++i)
+    {
+        waypoints.push_back(eulerAngleToQuaternion(Eigen::Vector3d(0.3 * i, -0.5 * i, 0.8 * i), "xyz"));
+    }
+    const SquadSpline spline(waypoints);
+
+    for (double u = 0.0; u <= 3.0 + 1e-9; u += 0.5)
+    {
+        const auto segment = static_cast<std::size_t>(u);
+        const Eigen::Quaterniond current = spline.evaluate(u);
+        const std::size_t from = std::min(segment, spline.waypointCount() - 1);
+
+        std::cout << "  u = " << std::setprecision(1) << std::fixed << u << "  段内进度 " << std::setprecision(2)
+                  << (u - static_cast<double>(segment)) << "  相对路点 " << from << " 的转角 "
+                  << std::setprecision(6) << rotationDistance(spline.waypoint(from), current) << "\n";
+    }
+
     return passed == static_cast<int>(cases.size()) ? 0 : 1;
 }

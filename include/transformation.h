@@ -19,9 +19,11 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <Eigen/Dense>
 
@@ -646,5 +648,136 @@ inline double rotationDistance(const Eigen::Quaterniond& a, const Eigen::Quatern
     // a⁻¹·b 的旋转向量模长即测地线距离，小角度下比 2·acos(|dot|) 更精确
     return quaternionToRotationVector(a.normalized().conjugate() * b.normalized()).norm();
 }
+
+/* ===========================================================================
+ * 球面样条（squad）：多个路点之间的平滑姿态轨迹
+ * =========================================================================== */
+
+/**
+ * @brief 计算 squad 的中间控制四元数
+ * @param previous 前一个路点
+ * @param current 当前路点（控制点围绕它构造）
+ * @param next 后一个路点
+ * @return 控制四元数 s_i = q_i · exp( −( log(q_i⁻¹q_{i+1}) + log(q_i⁻¹q_{i−1}) ) / 4 )
+ * @throw std::invalid_argument 任一路点四元数模长过小
+ * @note 内部使用最短弧对数映射，因此路点整体取反（q → −q）不影响结果
+ */
+inline Eigen::Quaterniond squadControlPoint(const Eigen::Quaterniond& previous, const Eigen::Quaterniond& current,
+                                            const Eigen::Quaterniond& next)
+{
+    const Eigen::Vector3d toNext = quaternionToRotationVector(current.conjugate() * next);
+    const Eigen::Vector3d toPrevious = quaternionToRotationVector(current.conjugate() * previous);
+
+    // 两侧"角速度"取平均后回代，得到使样条在路点处 C¹ 连续的控制点
+    return (current * rotationVectorToQuaternion(-0.25 * (toNext + toPrevious))).normalized();
+}
+
+/**
+ * @brief 单段球面四边形插值（squad）
+ * @param from 段起点四元数
+ * @param fromControl 段起点处的控制四元数
+ * @param toControl 段终点处的控制四元数
+ * @param to 段终点四元数
+ * @param t 插值参数，0 对应 from、1 对应 to
+ * @return 插值得到的单位四元数
+ * @throw std::invalid_argument 任一四元数模长过小
+ * @note squad(q_i, s_i, s_{i+1}, q_{i+1}; t) = slerp( slerp(q_i, q_{i+1}, t), slerp(s_i, s_{i+1}, t), 2t(1−t) )；
+ *       当两个控制点分别等于两端路点时（例如只有两个路点），该式退化为 slerp
+ */
+inline Eigen::Quaterniond squad(const Eigen::Quaterniond& from, const Eigen::Quaterniond& fromControl,
+                                const Eigen::Quaterniond& toControl, const Eigen::Quaterniond& to, double t)
+{
+    const Eigen::Quaterniond alongArc = slerp(from, to, t);
+    const Eigen::Quaterniond alongControls = slerp(fromControl, toControl, t);
+
+    return slerp(alongArc, alongControls, 2.0 * t * (1.0 - t));
+}
+
+/**
+ * @brief 多点姿态轨迹：经过全部路点的 C¹ 连续球面样条（squad）
+ *
+ * 用法：构造时给入路点，之后按参数 u ∈ [0, n−1] 求值，u 的整数部分为段号、小数部分为段内位置。
+ * 例：三个路点时 u ∈ [0, 2]，u = 1.5 表示第二段中点。
+ *
+ * 端点采用自然边界（控制点取路点自身），因此轨迹的首末端曲率不做约束，但必然精确通过每个路点。
+ */
+class SquadSpline
+{
+public:
+    /**
+     * @brief 由路点构造样条
+     * @param waypoints 路点序列，至少 2 个；内部会归一化
+     * @throw std::invalid_argument 路点少于 2 个，或存在模长过小的四元数
+     */
+    explicit SquadSpline(const std::vector<Eigen::Quaterniond>& waypoints) : m_waypoints(waypoints)
+    {
+        if (waypoints.size() < 2)
+        {
+            throw std::invalid_argument("SquadSpline：至少需要 2 个路点");
+        }
+
+        for (Eigen::Quaterniond& waypoint : m_waypoints)
+        {
+            if (waypoint.norm() < kTransformationQuaternionEpsilon)
+            {
+                throw std::invalid_argument("SquadSpline：路点四元数模长过小，无法表示旋转");
+            }
+            waypoint.normalize();
+        }
+
+        m_controls.resize(m_waypoints.size());
+        m_controls.front() = m_waypoints.front(); // 自然边界
+        m_controls.back() = m_waypoints.back();
+        for (std::size_t i = 1; i + 1 < m_waypoints.size(); ++i)
+        {
+            m_controls[i] = squadControlPoint(m_waypoints[i - 1], m_waypoints[i], m_waypoints[i + 1]);
+        }
+    }
+
+    /**
+     * @brief 按弧长参数求值
+     * @param u 轨迹参数，落在 [0, n−1]；超出范围会被截断到端点
+     * @return 该参数处的姿态四元数
+     */
+    Eigen::Quaterniond evaluate(double u) const
+    {
+        const double last = static_cast<double>(segmentCount());
+        const double clamped = std::clamp(u, 0.0, last);
+        const std::size_t segment = std::min(static_cast<std::size_t>(clamped), segmentCount() - 1);
+        const double local = clamped - static_cast<double>(segment);
+
+        return squad(m_waypoints[segment], m_controls[segment], m_controls[segment + 1], m_waypoints[segment + 1],
+                     local);
+    }
+
+    /**
+     * @brief 按弧长参数求值，返回旋转矩阵
+     * @param u 轨迹参数，落在 [0, n−1]
+     * @return 该参数处的旋转矩阵
+     */
+    Eigen::Matrix3d evaluateMatrix(double u) const { return roundNearZero(evaluate(u).toRotationMatrix()); }
+
+    /** @return 路点个数 */
+    std::size_t waypointCount() const { return m_waypoints.size(); }
+
+    /** @return 段数（路点数 − 1） */
+    std::size_t segmentCount() const { return m_waypoints.size() - 1; }
+
+    /**
+     * @brief 取第 i 个路点
+     * @throw std::out_of_range 下标越界
+     */
+    const Eigen::Quaterniond& waypoint(std::size_t index) const { return m_waypoints.at(index); }
+
+    /**
+     * @brief 取第 i 个控制点
+     * @throw std::out_of_range 下标越界
+     */
+    const Eigen::Quaterniond& controlPoint(std::size_t index) const { return m_controls.at(index); }
+
+private:
+    std::vector<Eigen::Quaterniond> m_waypoints;
+    std::vector<Eigen::Quaterniond> m_controls;
+};
 
 #endif // TRANSFORMATION_TRANSFORMATION_H_

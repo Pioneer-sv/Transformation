@@ -483,6 +483,185 @@ void testRotationMetrics()
     CHECK_THROWS(rotationDistance(Eigen::Quaterniond(0.0, 0.0, 0.0, 0.0), qb), std::invalid_argument);
 }
 
+void testSquad()
+{
+    // 只有两个路点时，squad 应精确退化为 slerp
+    const Eigen::Quaterniond a = Eigen::Quaterniond::Identity();
+    const Eigen::Quaterniond b = Eigen::Quaterniond(Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ()));
+    const SquadSpline twoPoint({a, b});
+    CHECK(twoPoint.waypointCount() == 2);
+    CHECK(twoPoint.segmentCount() == 1);
+    for (const double t : {0.0, 0.2, 0.5, 0.9, 1.0})
+    {
+        CHECK(quaternionError(twoPoint.evaluate(t), slerp(a, b, t)) < kTol);
+    }
+
+    // 多路点：必须精确经过每个路点
+    std::mt19937 gen(2026);
+    std::vector<Eigen::Quaterniond> waypoints;
+    for (int i = 0; i < 5; ++i)
+    {
+        waypoints.push_back(randomUnitQuaternion(gen));
+    }
+    const SquadSpline spline(waypoints);
+
+    CHECK(spline.waypointCount() == 5);
+    CHECK(spline.segmentCount() == 4);
+    for (std::size_t i = 0; i < waypoints.size(); ++i)
+    {
+        const double u = static_cast<double>(i);
+        CHECK(quaternionError(spline.evaluate(u), waypoints[i]) < 1e-9);
+        CHECK(rotationError(spline.evaluateMatrix(u), quaternionToRotationMatrix(waypoints[i])) < 1e-9);
+    }
+
+    // 参数越界截断到端点
+    CHECK(quaternionError(spline.evaluate(-5.0), waypoints.front()) < kTol);
+    CHECK(quaternionError(spline.evaluate(99.0), waypoints.back()) < kTol);
+
+    // 路点整体取反（q → −q 表示同一旋转）不应改变轨迹
+    std::vector<Eigen::Quaterniond> flipped;
+    for (std::size_t i = 0; i < waypoints.size(); ++i)
+    {
+        flipped.push_back(i % 2 == 0 ? Eigen::Quaterniond(-waypoints[i].coeffs()) : waypoints[i]);
+    }
+    const SquadSpline flippedSpline(flipped);
+    for (double u = 0.0; u <= 4.0; u += 0.37)
+    {
+        CHECK(quaternionError(spline.evaluate(u), flippedSpline.evaluate(u)) < 1e-9);
+    }
+
+    // 角速度连续性：squad 在路点处 C¹，逐段 slerp 则出现速度跳变
+    // 返回类型必须显式写成 Eigen::Vector3d：用 auto 会把表达式模板当返回类型，
+    // 引用到已析构的临时对象（Release 下侥幸正确，Debug 下会算出 inf）
+    const auto bodyAngularVelocity = [](const Eigen::Quaterniond& q0, const Eigen::Quaterniond& q1,
+                                        double h) -> Eigen::Vector3d {
+        return quaternionToRotationVector(q0.conjugate() * q1) / h;
+    };
+    const auto piecewiseSlerp = [&waypoints](double x) {
+        const std::size_t segment = std::min(static_cast<std::size_t>(x), waypoints.size() - 2);
+        return slerp(waypoints[segment], waypoints[segment + 1], x - static_cast<double>(segment));
+    };
+
+    const double h = 1e-6;
+    double worstSquadJump = 0.0;
+    double worstSlerpJump = 0.0;
+    for (std::size_t k = 1; k + 1 < waypoints.size(); ++k)
+    {
+        const double u = static_cast<double>(k);
+        const Eigen::Vector3d squadLeft = bodyAngularVelocity(spline.evaluate(u - h), spline.evaluate(u), h);
+        const Eigen::Vector3d squadRight = bodyAngularVelocity(spline.evaluate(u), spline.evaluate(u + h), h);
+        worstSquadJump = std::max(worstSquadJump, (squadLeft - squadRight).norm());
+
+        const Eigen::Vector3d slerpLeft = bodyAngularVelocity(piecewiseSlerp(u - h), piecewiseSlerp(u), h);
+        const Eigen::Vector3d slerpRight = bodyAngularVelocity(piecewiseSlerp(u), piecewiseSlerp(u + h), h);
+        worstSlerpJump = std::max(worstSlerpJump, (slerpLeft - slerpRight).norm());
+    }
+    CHECK(worstSquadJump < 1e-3);          // 连续性（有限差分误差量级）
+    CHECK(worstSlerpJump > worstSquadJump); // 对照组：逐段 slerp 的跳变明显更大
+
+    // 访问器与非法输入
+    CHECK(quaternionError(spline.waypoint(2), waypoints[2]) < kTol);
+    CHECK(quaternionError(spline.controlPoint(0), waypoints.front()) < kTol); // 自然边界
+    CHECK_THROWS(spline.waypoint(99), std::out_of_range);
+    CHECK_THROWS(spline.controlPoint(99), std::out_of_range);
+    CHECK_THROWS(SquadSpline(std::vector<Eigen::Quaterniond>{a}), std::invalid_argument);
+    CHECK_THROWS(SquadSpline(std::vector<Eigen::Quaterniond>{a, Eigen::Quaterniond(0.0, 0.0, 0.0, 0.0)}),
+                 std::invalid_argument);
+}
+
+void testEigenCrossCheck()
+{
+    std::mt19937 gen(20261013);
+
+    for (int i = 0; i < kRandomSamples; ++i)
+    {
+        const Eigen::Quaterniond q = randomUnitQuaternion(gen);
+        const Eigen::Matrix3d R = q.toRotationMatrix();
+
+        // 四元数 ↔ 矩阵：与 Eigen 自身的转换逐元素一致
+        CHECK(quaternionError(rotationMatrixToQuaternion(R), Eigen::Quaterniond(R)) < kTol);
+        CHECK((quaternionToRotationMatrix(q) - q.toRotationMatrix()).norm() < kTol);
+        CHECK((rotationMatrixToQuaternion(q.toRotationMatrix()).toRotationMatrix() - R).norm() < kTol);
+
+        // 轴角：本库与 Eigen::AngleAxisd(R) 必须表示同一旋转
+        CHECK(rotationError(axisAngleToRotationMatrix(rotationMatrixToAxisAngle(R)),
+                            Eigen::AngleAxisd(R).toRotationMatrix()) < 1e-9);
+
+        // 旋转向量：模长与旋转角一致，且能还原旋转
+        const Eigen::Vector3d rotationVector = rotationMatrixToRotationVector(R);
+        const double theta = rotationVector.norm();
+        CHECK(std::abs(theta - rotationAngle(R)) < kTol);
+        if (theta > 1e-6)
+        {
+            CHECK(rotationError(Eigen::AngleAxisd(theta, rotationVector / theta).toRotationMatrix(), R) < 1e-9);
+        }
+
+        // 欧拉角：6 种序列都与 Eigen::eulerAngles 等价（比较旋转，规避多解）
+        for (const std::string& order : kOrders)
+        {
+            const std::array<int, 3> indices = parseOrder(order);
+            const Eigen::Vector3d eigenEuler = R.eulerAngles(indices[0], indices[1], indices[2]);
+            const Eigen::Vector3d ourEuler = rotationMatrixToEulerAngle(R, order);
+
+            CHECK(rotationError(eulerAngleToRotationMatrix(ourEuler, order),
+                                eulerAngleToRotationMatrix(eigenEuler, order)) < 1e-9);
+        }
+    }
+
+    // roundNearZero：与逐元素阈值判断完全一致
+    Eigen::Matrix3d noisy = Eigen::Matrix3d::Identity();
+    noisy(0, 1) = 1e-12;
+    noisy(1, 2) = -1e-8;
+    noisy(2, 0) = 1.0;
+    const Eigen::Matrix3d cleaned = roundNearZero(noisy);
+    for (int r = 0; r < 3; ++r)
+    {
+        for (int c = 0; c < 3; ++c)
+        {
+            const double expected = std::abs(noisy(r, c)) < kTransformationZeroThreshold ? 0.0 : noisy(r, c);
+            CHECK(cleaned(r, c) == expected);
+        }
+    }
+
+    // 旋转距离：与 2·acos(|dot|) 的经典定义一致（小角度处后者精度差，故用较宽容差）
+    for (int i = 0; i < kRandomSamples; ++i)
+    {
+        const Eigen::Quaterniond q1 = randomUnitQuaternion(gen);
+        const Eigen::Quaterniond q2 = randomUnitQuaternion(gen);
+        const double classic = 2.0 * std::acos(std::min(1.0, std::abs(q1.dot(q2))));
+        CHECK(std::abs(rotationDistance(q1, q2) - classic) < 1e-6);
+    }
+
+    // slerp：与 Eigen 内置实现一致
+    for (int i = 0; i < 100; ++i)
+    {
+        const Eigen::Quaterniond q1 = randomUnitQuaternion(gen);
+        const Eigen::Quaterniond q2 = randomUnitQuaternion(gen);
+        CHECK(quaternionError(slerp(q1, q2, 0.6), q1.slerp(0.6, q2)) < 1e-9);
+    }
+}
+
+void testSmallAngleAndDefensiveBranches()
+{
+    // 指数/对数映射的小角度一阶分支（|θ| < kTransformationAngleEpsilon）
+    CHECK((quaternionToRotationMatrix(rotationVectorToQuaternion(Eigen::Vector3d(0.0, 0.0, 1e-12))) -
+           Eigen::Matrix3d::Identity())
+                  .norm() < 1e-12);
+    CHECK(quaternionToRotationVector(Eigen::Quaterniond(1.0, 0.0, 0.0, 1e-12)).norm() < 1e-11);
+
+    // 零旋转向量 → 恒等轴角（单位轴约定）
+    const Eigen::AngleAxisd zeroVector = rotationVectorToAxisAngle(Eigen::Vector3d::Zero());
+    CHECK(zeroVector.angle() < kTol);
+    CHECK(std::abs(zeroVector.axis().norm() - 1.0) < kTol);
+
+    // 零四元数的对数映射应被拒绝
+    CHECK_THROWS(quaternionToRotationVector(Eigen::Quaterniond(0.0, 0.0, 0.0, 0.0)), std::invalid_argument);
+
+    // 内部轴分派工具的防御性分支：非法轴名抛异常（公开 API 已由 parseOrder 挡住）
+    CHECK_THROWS(transformation_detail::axisRotationMatrix('q', 0.0), std::invalid_argument);
+    CHECK_THROWS(transformation_detail::axisRotationQuaternion('q', 0.0), std::invalid_argument);
+}
+
 } // namespace
 
 int main()
@@ -497,6 +676,9 @@ int main()
     runGroup("旋转向量：指数/对数映射与边界", testRotationVector);
     runGroup("插值：slerp 与测地线一致性", testInterpolation);
     runGroup("度量：旋转角与测地线距离", testRotationMetrics);
+    runGroup("轨迹：squad 球面样条", testSquad);
+    runGroup("对拍：与 Eigen 内置实现交叉验证", testEigenCrossCheck);
+    runGroup("分支：小角度近似与防御性分支", testSmallAngleAndDefensiveBranches);
     runGroup("性质：输出仍是合法旋转", testProperties);
 
     std::cout << "\n共 " << g_checks << " 项断言，" << g_failures << " 项失败\n";
