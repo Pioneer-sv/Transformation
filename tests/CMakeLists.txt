@@ -1,0 +1,4 @@
+add_executable(transformation_tests test_transformation.cpp)
+target_link_libraries(transformation_tests PRIVATE transformation::transformation transformation_warnings)
+
+add_test(NAME transformation_tests COMMAND transformation_tests)

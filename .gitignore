@@ -1,3 +1,11 @@
 .vscode/
-transformation/build/
-transformation/bin/
+.idea/
+build/
+build-*/
+cmake-build-*/
+bin/
+compile_commands.json
+.cache/
+*.o
+*.a
+*.so
